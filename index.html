@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- === CHARACTER ENCODING & MOBILE SETUP === -->
+<!-- UTF-8 lets you use accented Italian characters (è, à, ù, etc.) -->
+<meta charset="UTF-8">
+<!-- This makes the page fit the phone screen properly and prevents
+     the annoying zoom-in when you tap an input field -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+
+<title>thought.log</title>
+
+<!-- === PWA (Progressive Web App) SETUP === -->
+<!-- The manifest tells the phone/browser "this website can be installed as an app"
+     It defines the app name, icon, colors, etc. (see manifest.json) -->
+<link rel="manifest" href="manifest.json">
+<!-- theme-color sets the color of the phone's status bar when the app is open -->
+<meta name="theme-color" content="#1a1a17">
+<!-- These two lines are for iPhones specifically (Apple does things differently) -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+<!-- The little icon you see in the browser tab (a thought bubble emoji) -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💭</text></svg>">
+
+<!-- === FONTS === -->
+<!-- Loading two fonts from Google:
+     - DM Sans: a clean font for body text
+     - IBM Plex Mono: a monospace font (like a typewriter) for the log format -->
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<!-- === CSS STYLES === -->
+<!-- CSS is the language that controls how everything LOOKS (colors, sizes, positions).
+     Think of HTML as the skeleton and CSS as the skin/clothes. -->
+<style>
+/* Reset: remove default browser spacing so everything starts from zero */
+*{box-sizing:border-box;margin:0;padding:0}
+
+/* :root defines "variables" — like constants in MATLAB.
+   Instead of writing #1a1a17 everywhere, we write var(--bg).
+   If you want to change a color, you change it in ONE place. */
+:root{
+  --bg:#1a1a17;         /* dark background (almost black, warm) */
+  --surface:#23231f;    /* slightly lighter, used for cards */
+  --border:#3a3a32;     /* subtle border color */
+  --ink:#e8e4d9;        /* main text color (warm off-white) */
+  --ink-dim:#9e9a8b;    /* dimmed text for secondary info */
+  --accent:#c9a84c;     /* gold accent for dates and buttons */
+  --tag:#5b8a72;        /* green for #hashtags */
+  --tag-bg:rgba(91,138,114,0.15); /* transparent green background for tag chips */
+  --danger:#c45c4a;     /* red for delete/stop buttons */
+  --mono:'IBM Plex Mono','Courier New',monospace;  /* typewriter font */
+  --sans:'DM Sans',sans-serif;                      /* clean body font */
+}
+
+/* Base page styling */
+html,body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:var(--sans);
+  min-height:100vh;                          /* vh = viewport height, fill the screen */
+  -webkit-tap-highlight-color:transparent;   /* remove the blue flash when tapping on phones */
+}
+
+/* Make inputs and buttons inherit the page font instead of using ugly defaults */
+input,textarea,button{font-family:inherit}
+/* Style the placeholder text in inputs */
+input::placeholder{color:var(--ink-dim);opacity:.6}
+
+/* === ANIMATIONS ===
+   @keyframes defines an animation you can reuse.
+   Think of it like defining a function in MATLAB that you call later. */
+
+/* fadeIn: element slides up and fades in (used for new thoughts, entries) */
+@keyframes fadeIn{
+  from{opacity:0;transform:translateY(8px)}  /* start invisible, 8px below */
+  to{opacity:1;transform:translateY(0)}      /* end visible, normal position */
+}
+/* pulse: mic button breathes when recording */
+@keyframes pulse{
+  0%,100%{transform:scale(1)}   /* normal size at start and end */
+  50%{transform:scale(1.1)}     /* slightly bigger in the middle */
+}
+/* toastIn: the "Saved" notification slides up from the bottom */
+@keyframes toastIn{
+  from{opacity:0;transform:translate(-50%,16px)}
+  to{opacity:1;transform:translate(-50%,0)}
+}
+
+/* === LAYOUT === */
+/* The main wrapper: centered, max 520px wide (good for phones and desktop) */
+.wrap{max-width:520px;margin:0 auto;padding:0 16px 80px}
+
+/* Header: logo on the left, tabs on the right */
+.header{padding:24px 0 16px;display:flex;align-items:baseline;justify-content:space-between}
+.logo{font-family:var(--mono);font-size:18px;font-weight:500;letter-spacing:.05em;color:var(--accent)}
+
+/* Tab buttons (capture / log) */
+.tabs{display:flex;gap:4px}
+.tab{background:transparent;border:1px solid transparent;color:var(--ink-dim);padding:6px 14px;border-radius:6px;cursor:pointer;font-family:var(--mono);font-size:12px;font-weight:500}
+.tab.active{background:var(--surface);border-color:var(--border);color:var(--ink)}
+
+/* === CAPTURE CARD === */
+/* The top of the card shows the date stamp [YYMMDD HH:MM] */
+.card-top{font-family:var(--mono);font-size:15px;color:var(--accent);padding:12px 16px;background:var(--surface);border-radius:10px 10px 0 0;border:1px solid var(--border);border-bottom:none}
+
+/* Each row has: a label (@, -), an input field, and a mic button */
+.row{display:flex;align-items:center;gap:8px;padding:10px 16px;background:var(--surface);border-left:1px solid var(--border);border-right:1px solid var(--border)}
+.row-label{font-family:var(--mono);color:var(--ink-dim);font-size:15px;flex-shrink:0}
+.row-label.active{color:var(--accent)}
+.row input{flex:1;background:transparent;border:none;outline:none;color:var(--ink);font-size:15px}
+
+/* Microphone button: round, gold, turns red when recording */
+.mic{width:48px;height:48px;border-radius:50%;background:var(--accent);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
+.mic.on{background:var(--danger);animation:pulse 1.5s ease-in-out infinite}
+
+/* List of thoughts already added to the current entry */
+.thoughts-list{background:var(--surface);border-left:1px solid var(--border);border-right:1px solid var(--border);padding:4px 16px 8px}
+.thought-item{display:flex;align-items:flex-start;gap:8px;padding:6px 0;animation:fadeIn .2s ease}
+.thought-item span{flex:1;font-size:14px;line-height:1.5}
+.thought-item .del{background:none;border:none;color:var(--ink-dim);cursor:pointer;font-size:16px;line-height:1;padding:0 2px;flex-shrink:0}
+/* Hashtag highlighting: green and bold */
+.ht{color:var(--tag);font-weight:500}
+
+/* "+ add thought" button at the bottom of the card */
+.add-btn{width:100%;padding:10px;background:var(--surface);border:1px solid var(--border);border-top:1px dashed var(--border);border-radius:0 0 10px 10px;color:var(--ink-dim);cursor:pointer;font-family:var(--mono);font-size:13px;transition:color .15s}
+.add-btn:hover{color:var(--accent)}
+
+/* Tag suggestion chips (the little #tag buttons below the card) */
+.tags-bar{margin-top:16px;display:flex;flex-wrap:wrap;gap:6px}
+.tag-chip{background:var(--tag-bg);border:1px solid rgba(91,138,114,.2);color:var(--tag);border-radius:20px;padding:4px 12px;font-family:var(--mono);font-size:12px;cursor:pointer;transition:all .15s}
+.tag-chip:hover{background:var(--tag);color:var(--bg)}
+
+/* Big gold "Save entry" button */
+.save-btn{width:100%;margin-top:20px;padding:14px;background:var(--accent);border:none;border-radius:10px;color:var(--bg);font-size:15px;font-weight:600;cursor:pointer;transition:opacity .15s;letter-spacing:.02em}
+.save-btn:hover{opacity:.85}
+
+/* === LOG VIEW === */
+/* Toolbar with copy and clear buttons */
+.toolbar{display:flex;gap:8px;margin-bottom:16px}
+.tool-btn{padding:8px 16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-family:var(--mono);font-size:12px;cursor:pointer}
+.tool-btn.copy{color:var(--accent)}
+.tool-btn.clear{color:var(--danger)}
+
+/* Each saved entry card in the log */
+.entry{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:10px;animation:fadeIn .25s ease}
+.entry-head{display:flex;justify-content:space-between;align-items:center}
+.entry-date{font-family:var(--mono);font-size:13px;color:var(--accent)}
+.entry-del{background:none;border:none;color:var(--ink-dim);cursor:pointer;font-size:14px;font-family:var(--mono)}
+.entry-del:hover{color:var(--danger)}
+.entry-ctx{font-family:var(--mono);font-size:13px;color:var(--ink-dim);margin-top:6px}
+.entry-t{font-size:14px;margin-top:5px;padding-left:12px;line-height:1.5}
+
+/* The text area that appears when clipboard copy fails (fallback) */
+.export-area{width:100%;min-height:160px;margin-bottom:16px;padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--ink);font-family:var(--mono);font-size:12px;resize:vertical;outline:none}
+/* "nothing here yet" message */
+.empty{color:var(--ink-dim);font-family:var(--mono);font-size:13px;text-align:center;margin-top:60px}
+
+/* Toast notification: the little "Saved" / "Copied" message at the bottom */
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--accent);color:var(--bg);padding:8px 20px;border-radius:20px;font-family:var(--mono);font-size:13px;font-weight:500;animation:toastIn .2s ease;z-index:100}
+
+/* Utility class: adding "hidden" to any element hides it */
+.hidden{display:none}
+</style>
+</head>
+
+<!-- ============================================================
+     HTML BODY — THE STRUCTURE OF THE APP
+     ============================================================
+     Think of this like the layout of a form in MATLAB's App Designer.
+     Each <div> is a container, each <button> is clickable,
+     each <input> is a text field.
+     
+     "onclick" means: when the user clicks this, run this JavaScript function.
+     "id" means: this element has a unique name so JavaScript can find it.
+     "class" means: apply these CSS styles to this element.
+     ============================================================ -->
+<body>
+<div class="wrap" id="app">
+
+  <!-- HEADER: logo + tab buttons -->
+  <div class="header">
+    <div class="logo">thought.log</div>
+    <div class="tabs">
+      <!-- Language toggle for voice input: tap to switch between EN and IT -->
+      <button class="tab" id="lang-btn" onclick="toggleLang()" title="Voice language">EN</button>
+      <!-- data-view is a custom attribute we use in JavaScript to know which tab is which -->
+      <button class="tab active" data-view="capture" onclick="switchView('capture')">capture</button>
+      <button class="tab" data-view="log" onclick="switchView('log')">log (0)</button>
+    </div>
+  </div>
+
+  <!-- ==================== CAPTURE VIEW ==================== -->
+  <!-- This is where you type/dictate new thoughts -->
+  <div id="capture-view">
+
+    <!-- Auto-generated date/time stamp, e.g. [260408 14:30] -->
+    <div class="card-top" id="stamp"></div>
+
+    <!-- Context row: the @ line (where/when/why) -->
+    <div class="row">
+      <span class="row-label">@</span>
+      <input id="ctx-input" placeholder="where, when, why...">
+      <!-- Mic button for context — the SVG inside is just a microphone icon drawing -->
+      <button class="mic" id="mic-ctx" onclick="toggleMic('context')">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1a1a17" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>
+      </button>
+    </div>
+
+    <!-- List of thoughts already added (starts hidden, shown by JavaScript) -->
+    <div id="thoughts-list" class="thoughts-list hidden"></div>
+
+    <!-- Thought input row: the - line -->
+    <div class="row">
+      <span class="row-label active">-</span>
+      <!-- onkeydown: when you press Enter, it calls addThought() -->
+      <input id="thought-input" placeholder="your thought..." onkeydown="if(event.key==='Enter')addThought()">
+      <!-- Mic button for thoughts -->
+      <button class="mic" id="mic-thought" onclick="toggleMic('thought')">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1a1a17" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>
+      </button>
+    </div>
+
+    <button class="add-btn" onclick="addThought()">+ add thought (or press Enter)</button>
+
+    <!-- Tag suggestions: shows your most-used #tags as tappable chips -->
+    <div id="tags-bar" class="tags-bar hidden"></div>
+
+    <button class="save-btn" onclick="saveEntry()">Save entry</button>
+  </div>
+
+  <!-- ==================== LOG VIEW ==================== -->
+  <!-- This shows all your saved entries -->
+  <div id="log-view" class="hidden">
+
+    <!-- Toolbar: copy and clear buttons -->
+    <div id="toolbar" class="toolbar hidden">
+      <button class="tool-btn copy" onclick="copyAll()">⎘ copy as .txt</button>
+      <button class="tool-btn clear" onclick="clearAll()">✕ clear all</button>
+    </div>
+
+    <!-- Fallback: if clipboard copy fails, the full text appears here
+         so you can manually select-all and copy -->
+    <textarea id="export-area" class="export-area hidden" readonly onfocus="this.select()"></textarea>
+
+    <!-- Saved entries will be inserted here by JavaScript -->
+    <div id="entries-container"></div>
+  </div>
+</div>
+
+<!-- Toast notification (hidden by default, shown briefly by flash()) -->
+<div id="toast" class="toast hidden"></div>
+
+
+<!-- ============================================================
+     JAVASCRIPT — THE LOGIC OF THE APP
+     ============================================================
+     This is like a MATLAB script: it runs top to bottom when
+     the page loads, defining variables and functions.
+     
+     Key concepts if you know MATLAB/Python:
+     - let/const = variable declaration (like x = 5 in MATLAB)
+     - function = same as function in MATLAB or def in Python
+     - document.getElementById('x') = finds an HTML element by its id
+     - element.classList = controls CSS classes (add/remove "hidden", etc.)
+     - element.innerHTML = sets the HTML content of an element
+     - localStorage = a tiny database built into the browser
+       (like save/load in MATLAB, but automatic and per-website)
+     - JSON = a text format for storing data (like a struct in MATLAB)
+     ============================================================ -->
+<script>
+
+// ===================================================================
+// 1. STATE (the data the app keeps track of)
+// ===================================================================
+
+// Load saved entries from localStorage.
+// localStorage stores data as text, so we use JSON.parse to convert
+// the text back into a JavaScript array of objects.
+// The '[]' is the default: an empty array if nothing was saved yet.
+let entries = JSON.parse(localStorage.getItem('thought-log') || '[]');
+
+// The thoughts being composed for the CURRENT entry (not yet saved).
+// This resets every time you hit "Save entry".
+let thoughts = [];
+
+// Voice recording state
+let listening = false;      // true when the mic is active
+let listenTarget = null;    // which field is being dictated to: 'context' or 'thought'
+let recognition = null;     // the speech recognition object (created when you tap the mic)
+
+// Voice language: defaults to English, tap the "EN/IT" button to switch
+let micLang = localStorage.getItem('thought-log-lang') || 'en-US';
+
+// Check if this browser supports speech recognition.
+// Chrome and Edge do, Firefox and Safari may not.
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+
+// ===================================================================
+// 2. HELPER FUNCTIONS (small utilities used by the main functions)
+// ===================================================================
+
+/**
+ * pad(n) — Adds a leading zero to single-digit numbers.
+ * pad(3) => "03", pad(12) => "12"
+ * Used for formatting dates and times.
+ */
+function pad(n) { return String(n).padStart(2, '0'); }
+
+/**
+ * now() — Returns the current date and time in our format.
+ * Returns an object like: { date: "260408", time: "14:30" }
+ *
+ * getFullYear() gives 2026, we slice to get "26".
+ * getMonth() is 0-based (January = 0), so we add 1.
+ */
+function now() {
+  const d = new Date();
+  return {
+    date: String(d.getFullYear()).slice(2) + pad(d.getMonth()+1) + pad(d.getDate()),
+    time: pad(d.getHours()) + ':' + pad(d.getMinutes())
+  };
+}
+
+/**
+ * flash(msg) — Shows a brief notification at the bottom of the screen.
+ * It appears, then disappears after 2 seconds.
+ * Used for "Saved", "Copied to clipboard", etc.
+ */
+function flash(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;           // set the message text
+  t.classList.remove('hidden');  // show it
+  setTimeout(() => t.classList.add('hidden'), 2000);  // hide after 2 seconds
+}
+
+/**
+ * escHtml(s) — Security function: prevents HTML injection.
+ * If someone types HTML code as a thought (like a bold tag or worse),
+ * this converts the < and > into harmless text characters.
+ * Without this, the browser would try to run the code.
+ */
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/**
+ * highlightTags(text) — Makes #hashtags green in the displayed text.
+ * First escapes HTML (security), then wraps any #word in a green <span>.
+ * 
+ * The /(#\w+)/g is a "regular expression" (regex) — a pattern matcher.
+ * #     = literal hash character
+ * \w+   = one or more "word" characters (letters, numbers, underscore)
+ * g     = find ALL matches, not just the first one
+ *
+ * So "try this #idea for #removable" becomes:
+ * "try this <span class="ht">#idea</span> for <span class="ht">#removable</span>"
+ */
+function highlightTags(text) {
+  return escHtml(text).replace(/(#\w+)/g, '<span class="ht">$1</span>');
+}
+
+/**
+ * entriesToTxt(list) — Converts all entries into your .txt format.
+ * This is what gets copied to clipboard for pasting into Google Drive.
+ *
+ * .reverse() puts entries in chronological order (oldest first),
+ * because internally we store newest-first for display.
+ *
+ * Output looks like:
+ * [260408 09:00]
+ * @ walking to the lab
+ * - first thought #removable
+ * - second thought
+ *
+ * [260408 14:30]
+ * @ cooking
+ * - another thought
+ */
+function entriesToTxt(list) {
+  return [...list].reverse().map(e => {
+    // [...list] creates a copy so we don't modify the original array
+    let b = `[${e.date} ${e.time}]`;
+    if (e.context) b += '\n@ ' + e.context;       // \n = new line
+    e.thoughts.forEach(t => b += '\n- ' + t);      // add each thought
+    return b;
+  }).join('\n\n');  // separate entries with a blank line
+}
+
+/**
+ * persist() — Saves the entries array to localStorage.
+ * Called every time entries change (add, delete, clear).
+ * localStorage survives closing the browser, restarting the phone, etc.
+ * Data stays ONLY on this device, in this browser.
+ */
+function persist() {
+  localStorage.setItem('thought-log', JSON.stringify(entries));
+}
+
+/**
+ * extractTags() — Scans ALL saved entries and returns the most-used #tags.
+ * Used to show the tag suggestion chips.
+ *
+ * How it works:
+ * 1. Loop through every thought in every entry
+ * 2. Find all #hashtags using regex
+ * 3. Count how many times each tag appears
+ * 4. Sort by frequency (most used first)
+ * 5. Return just the tag names
+ */
+function extractTags() {
+  const c = {};  // counts object, like a Python dictionary: { '#removable': 5, '#idea': 2 }
+  entries.forEach(e => e.thoughts.forEach(t => {
+    const m = t.match(/#\w+/g);                    // find all #tags in this thought
+    if (m) m.forEach(tag => c[tag] = (c[tag]||0) + 1);  // increment count (or start at 1)
+  }));
+  return Object.entries(c)          // convert { '#removable': 5 } to [['#removable', 5]]
+    .sort((a,b) => b[1]-a[1])       // sort by count, highest first
+    .map(([t]) => t);               // keep only the tag name, drop the count
+}
+
+
+// ===================================================================
+// 3. DATE/TIME STAMP (auto-updates every 30 seconds)
+// ===================================================================
+
+/**
+ * updateStamp() — Updates the [YYMMDD HH:MM] shown at the top of the capture card.
+ * Called once on page load, then every 30 seconds via setInterval.
+ */
+function updateStamp() {
+  const {date, time} = now();  // "destructuring": extracts date and time from the object
+  document.getElementById('stamp').textContent = `[${date} ${time}]`;
+}
+updateStamp();                          // run once immediately
+setInterval(updateStamp, 30000);        // then every 30 seconds (30000 milliseconds)
+
+
+// ===================================================================
+// 4. VIEW SWITCHING (capture vs. log)
+// ===================================================================
+
+/**
+ * switchView(v) — Toggles between the "capture" and "log" views.
+ * - Highlights the active tab
+ * - Shows/hides the corresponding view
+ * - If switching to log, re-renders the entries
+ */
+function switchView(v) {
+  // Update tab styling: make the clicked tab "active", deactivate the other
+  document.querySelectorAll('.tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.view === v)
+  );
+  // Show/hide views: classList.toggle('hidden', condition)
+  // If condition is true, it ADDS 'hidden'. If false, it REMOVES it.
+  document.getElementById('capture-view').classList.toggle('hidden', v !== 'capture');
+  document.getElementById('log-view').classList.toggle('hidden', v !== 'log');
+  // Refresh the log display when switching to it
+  if (v === 'log') renderLog();
+}
+
+
+// ===================================================================
+// 5. CAPTURE FUNCTIONS (composing a new entry)
+// ===================================================================
+
+/**
+ * renderThoughts() — Redraws the list of thoughts in the current entry.
+ * Called after adding or removing a thought.
+ *
+ * This uses "template literals" (backtick strings with ${...}) to build HTML.
+ * It's like sprintf in MATLAB: `Hello ${name}` becomes "Hello Gregorio".
+ */
+function renderThoughts() {
+  const el = document.getElementById('thoughts-list');
+  // If there are no thoughts yet, hide the container
+  if (thoughts.length === 0) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+  // Otherwise, show it and fill it with thought items
+  el.classList.remove('hidden');
+  el.innerHTML = thoughts.map((t, i) => `
+    <div class="thought-item">
+      <span style="font-family:var(--mono);color:var(--ink-dim);font-size:14px;flex:none">-</span>
+      <span>${highlightTags(t)}</span>
+      <button class="del" onclick="removeThought(${i})">×</button>
+    </div>
+  `).join('');
+  // .map() transforms each thought into HTML
+  // .join('') concatenates them all into one string
+}
+
+/**
+ * renderTagsBar() — Shows/updates the tag suggestion chips below the card.
+ * Only shows tags you've actually used before.
+ */
+function renderTagsBar() {
+  const tags = extractTags();
+  const el = document.getElementById('tags-bar');
+  if (tags.length === 0) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  // Show at most 12 tags, each as a tappable button
+  el.innerHTML = tags.slice(0, 12).map(tag =>
+    `<button class="tag-chip" onclick="insertTag('${tag}')">${tag}</button>`
+  ).join('');
+}
+
+/**
+ * addThought() — Takes the text from the thought input, adds it to the
+ * thoughts array, clears the input, and re-renders the list.
+ */
+function addThought() {
+  const inp = document.getElementById('thought-input');
+  const t = inp.value.trim();     // .trim() removes leading/trailing spaces
+  if (!t) return;                 // do nothing if the input is empty
+  thoughts.push(t);              // add to the array (like append in Python)
+  inp.value = '';                // clear the input field
+  inp.focus();                   // put the cursor back in the input
+  renderThoughts();              // redraw the list
+}
+
+/**
+ * removeThought(i) — Removes the thought at position i from the current entry.
+ * .splice(i, 1) means: at position i, remove 1 element.
+ */
+function removeThought(i) {
+  thoughts.splice(i, 1);
+  renderThoughts();
+}
+
+/**
+ * insertTag(tag) — When you tap a tag chip, it appends that #tag
+ * to whatever you're currently typing in the thought input.
+ */
+function insertTag(tag) {
+  const inp = document.getElementById('thought-input');
+  inp.value = (inp.value ? inp.value + ' ' : '') + tag + ' ';
+  inp.focus();
+}
+
+/**
+ * saveEntry() — Saves the current entry (date + context + thoughts)
+ * to the entries array and to localStorage.
+ *
+ * unshift() adds to the BEGINNING of the array (so newest entries appear first).
+ * After saving, it clears the current composition and refreshes the UI.
+ */
+function saveEntry() {
+  if (thoughts.length === 0) { flash('Add at least one thought'); return; }
+  const {date, time} = now();
+  const ctx = document.getElementById('ctx-input').value.trim();
+  // Create an entry object with all the data
+  entries.unshift({
+    id: Date.now(),             // unique ID based on current timestamp (milliseconds)
+    date,                       // shorthand for date: date
+    time,
+    context: ctx,
+    thoughts: [...thoughts]     // [...x] creates a copy of the array
+  });
+  persist();                    // save to localStorage
+  // Reset the capture form
+  thoughts = [];
+  document.getElementById('ctx-input').value = '';
+  document.getElementById('thought-input').value = '';
+  renderThoughts();
+  renderTagsBar();              // update tag suggestions (new tags might have been added)
+  updateLogCount();             // update "log (N)" in the tab
+  flash('Saved');
+}
+
+/**
+ * updateLogCount() — Updates the number shown in the "log (N)" tab button.
+ */
+function updateLogCount() {
+  document.querySelector('[data-view="log"]').textContent = `log (${entries.length})`;
+}
+
+
+// ===================================================================
+// 6. LOG FUNCTIONS (viewing, exporting, deleting saved entries)
+// ===================================================================
+
+/**
+ * renderLog() — Draws all saved entries as cards in the log view.
+ * Each card shows the date, context, thoughts, and a delete button.
+ */
+function renderLog() {
+  const container = document.getElementById('entries-container');
+  const toolbar = document.getElementById('toolbar');
+  // Show toolbar only if there are entries
+  toolbar.classList.toggle('hidden', entries.length === 0);
+
+  if (entries.length === 0) {
+    container.innerHTML = '<p class="empty">nothing here yet. go capture something.</p>';
+    return;
+  }
+  // Build the HTML for each entry
+  container.innerHTML = entries.map(e => `
+    <div class="entry">
+      <div class="entry-head">
+        <span class="entry-date">[${e.date} ${e.time}]</span>
+        <button class="entry-del" onclick="deleteEntry(${e.id})">del</button>
+      </div>
+      ${e.context ? `<div class="entry-ctx">@ ${escHtml(e.context)}</div>` : ''}
+      ${e.thoughts.map(t => `<div class="entry-t"><span style="color:var(--ink-dim);font-family:var(--mono)">- </span>${highlightTags(t)}</div>`).join('')}
+    </div>
+  `).join('');
+}
+
+/**
+ * deleteEntry(id) — Removes a single entry by its unique ID.
+ * .filter() keeps only the entries whose ID does NOT match.
+ */
+function deleteEntry(id) {
+  entries = entries.filter(e => e.id !== id);
+  persist();
+  updateLogCount();
+  renderLog();
+}
+
+/**
+ * copyAll() — Copies ALL entries to clipboard in your .txt format.
+ * 
+ * navigator.clipboard.writeText() is the modern clipboard API.
+ * It returns a "Promise" — basically, it tries to copy, and:
+ *   .then() runs if it succeeds
+ *   .catch() runs if it fails (e.g., browser blocks clipboard access)
+ * 
+ * If clipboard fails, we show the text in a <textarea> so you can
+ * manually select-all and copy.
+ */
+function copyAll() {
+  const txt = entriesToTxt(entries);
+  const area = document.getElementById('export-area');
+  navigator.clipboard.writeText(txt).then(() => {
+    flash('Copied to clipboard');
+    area.classList.add('hidden');
+  }).catch(() => {
+    // Fallback: show text in a text area for manual copying
+    area.value = txt;
+    area.classList.remove('hidden');
+    area.focus();
+    area.select();  // auto-select all text so you just need Ctrl+C
+  });
+}
+
+/**
+ * clearAll() — Deletes ALL entries after asking for confirmation.
+ * confirm() shows a browser popup with OK/Cancel.
+ */
+function clearAll() {
+  if (!confirm('Clear all entries?')) return;  // user clicked Cancel
+  entries = [];
+  persist();
+  updateLogCount();
+  document.getElementById('export-area').classList.add('hidden');
+  renderLog();
+  flash('All cleared');
+}
+
+
+// ===================================================================
+// 7. VOICE INPUT (speech-to-text via the browser's built-in API)
+// ===================================================================
+
+/**
+ * toggleMic(target) — Starts or stops voice recognition.
+ * target is either 'context' (the @ field) or 'thought' (the - field).
+ *
+ * The Web Speech API is built into Chrome/Edge. It sends your audio
+ * to Google's servers for transcription (needs internet), unless you
+ * have offline language packs installed.
+ *
+ * r.lang = 'it-IT' tells it to expect Italian.
+ * r.onresult fires when speech is recognized and gives us the text.
+ */
+function toggleMic(target) {
+  // If already listening to this target, stop
+  if (listening && listenTarget === target) { stopMic(); return; }
+  // If browser doesn't support speech recognition
+  if (!SpeechRecognition) { flash('Use your keyboard mic button'); return; }
+  // If already listening to something else, stop that first
+  if (recognition) recognition.abort();
+
+  // Create a new speech recognition session
+  const r = new SpeechRecognition();
+  r.lang = micLang;           // recognize the selected language (EN or IT)
+  r.interimResults = false;    // only give us the final result, not partial guesses
+  r.continuous = false;        // stop after one sentence (tap again for more)
+
+  // When speech is successfully recognized:
+  r.onresult = (ev) => {
+    const text = ev.results[0][0].transcript;  // the recognized text
+    // Put the text into the appropriate input field
+    const inp = target === 'context'
+      ? document.getElementById('ctx-input')
+      : document.getElementById('thought-input');
+    // Append to existing text (if any), separated by a space
+    inp.value = (inp.value ? inp.value + ' ' : '') + text;
+    stopMic();
+  };
+
+  // If something goes wrong (permission denied, no speech detected, etc.)
+  r.onerror = () => stopMic();
+  // When recognition ends naturally (after one sentence)
+  r.onend = () => stopMic();
+
+  recognition = r;
+  try {
+    r.start();                 // actually start listening
+    listening = true;
+    listenTarget = target;
+    updateMicUI();             // turn the mic button red
+  } catch {
+    flash('Mic not available');
+  }
+}
+
+/**
+ * stopMic() — Stops the current speech recognition session
+ * and resets the mic button to its normal state.
+ */
+function stopMic() {
+  if (recognition) recognition.stop();
+  listening = false;
+  listenTarget = null;
+  recognition = null;
+  updateMicUI();
+}
+
+/**
+ * updateMicUI() — Swaps the mic icon between "microphone" and "stop square",
+ * and toggles the red pulsing animation.
+ *
+ * The SVG strings are just icon drawings:
+ * - micIcon: a microphone shape
+ * - stopIcon: a square (universal "stop" symbol)
+ */
+function updateMicUI() {
+  const micCtx = document.getElementById('mic-ctx');
+  const micThought = document.getElementById('mic-thought');
+  const stopIcon = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1a1a17" stroke-width="2.5"><rect x="6" y="6" width="12" height="12" rx="2" fill="#1a1a17"/></svg>';
+  const micIcon = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1a1a17" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>';
+
+  // Set the right icon and animation state for each mic button
+  micCtx.innerHTML = (listening && listenTarget === 'context') ? stopIcon : micIcon;
+  micCtx.classList.toggle('on', listening && listenTarget === 'context');
+  micThought.innerHTML = (listening && listenTarget === 'thought') ? stopIcon : micIcon;
+  micThought.classList.toggle('on', listening && listenTarget === 'thought');
+}
+
+
+// ===================================================================
+// 8. INITIALIZATION (runs once when the page loads)
+// ===================================================================
+
+/**
+ * toggleLang() — Switches the voice recognition language between English and Italian.
+ * Saves the preference to localStorage so it persists across sessions.
+ */
+function toggleLang() {
+  micLang = (micLang === 'en-US') ? 'it-IT' : 'en-US';
+  localStorage.setItem('thought-log-lang', micLang);
+  updateLangUI();
+}
+
+/** Updates the language button text to show the current language */
+function updateLangUI() {
+  const btn = document.getElementById('lang-btn');
+  btn.textContent = micLang === 'en-US' ? 'EN' : 'IT';
+}
+
+// Show the correct count in the "log (N)" tab
+updateLogCount();
+
+// Show tag suggestions based on existing entries
+renderTagsBar();
+
+// Show the correct language on the toggle button
+updateLangUI();
+
+// Register the Service Worker for offline support.
+// A Service Worker is a background script that intercepts network requests.
+// Once registered, it caches the app files so the app works WITHOUT internet.
+// See sw.js for what it does.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+</script>
+</body>
+</html>
