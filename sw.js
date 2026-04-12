@@ -19,7 +19,7 @@
 // CACHE_NAME: a version label for our cache.
 // If you update the app, change this to 'thought-log-v2' etc.
 // This forces the old cache to be deleted and new files to be downloaded.
-const CACHE = 'thought-log-v3';
+const CACHE = 'thought-log-v4';
 
 // The list of files to cache for offline use.
 // './' is the root URL (which loads index.html).
