@@ -109,6 +109,14 @@ input::placeholder{color:var(--ink-dim);opacity:.6}
 .row-label{font-family:var(--mono);color:var(--ink-dim);font-size:15px;flex-shrink:0}
 .row-label.active{color:var(--accent)}
 .row input{flex:1;background:transparent;border:none;outline:none;color:var(--ink);font-size:15px}
+.row textarea{
+  flex:1;background:transparent;border:none;outline:none;
+  color:var(--ink);font-size:15px;font-family:inherit;
+  resize:none;overflow:hidden;
+  line-height:1.5;
+  min-height:24px;max-height:160px;
+  field-sizing:content;
+}
 
 /* Microphone button: round, gold, turns red when recording */
 .mic{width:48px;height:48px;border-radius:50%;background:var(--accent);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
@@ -135,6 +143,28 @@ input::placeholder{color:var(--ink-dim);opacity:.6}
 .save-btn{width:100%;margin-top:20px;padding:14px;background:var(--accent);border:none;border-radius:10px;color:var(--bg);font-size:15px;font-weight:600;cursor:pointer;transition:opacity .15s;letter-spacing:.02em}
 .save-btn:hover{opacity:.85}
 
+/* "edit" button */
+.edit-form{margin-top:10px}
+.edit-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.edit-row .row-label{font-family:var(--mono);color:var(--ink-dim);font-size:14px;flex-shrink:0}
+.edit-input{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;
+  padding:8px 10px;color:var(--ink);font-size:14px;outline:none;font-family:inherit}
+.edit-input:focus{border-color:var(--accent)}
+.edit-del{background:none;border:none;color:var(--ink-dim);cursor:pointer;font-size:16px;
+  flex-shrink:0;padding:0 4px}
+.edit-del:hover{color:var(--danger)}
+.edit-add{background:none;border:1px dashed var(--border);border-radius:6px;color:var(--ink-dim);
+  cursor:pointer;font-family:var(--mono);font-size:12px;padding:6px;width:100%;
+  margin-top:2px;margin-bottom:8px}
+.edit-add:hover{color:var(--accent);border-color:var(--accent)}
+.edit-actions{display:flex;gap:8px;margin-top:8px}
+.edit-save{flex:1;padding:10px;background:var(--accent);border:none;border-radius:8px;
+  color:var(--bg);font-weight:600;font-size:13px;cursor:pointer}
+.edit-save:hover{opacity:.85}
+.edit-cancel{flex:1;padding:10px;background:transparent;border:1px solid var(--border);
+  border-radius:8px;color:var(--ink-dim);font-size:13px;cursor:pointer;font-family:var(--mono)}
+.edit-cancel:hover{color:var(--ink);border-color:var(--ink-dim)}
+
 /* === LOG VIEW === */
 /* Toolbar with copy and clear buttons */
 .toolbar{display:flex;gap:8px;margin-bottom:16px}
@@ -146,8 +176,12 @@ input::placeholder{color:var(--ink-dim);opacity:.6}
 .entry{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:10px;animation:fadeIn .25s ease}
 .entry-head{display:flex;justify-content:space-between;align-items:center}
 .entry-date{font-family:var(--mono);font-size:13px;color:var(--accent)}
-.entry-del{background:none;border:none;color:var(--ink-dim);cursor:pointer;font-size:14px;font-family:var(--mono)}
-.entry-del:hover{color:var(--danger)}
+     
+.entry-actions{display:flex;gap:8px}
+.entry-act{background:none;border:none;color:var(--ink-dim);cursor:pointer;font-size:14px;font-family:var(--mono)}
+.entry-act:hover{color:var(--accent)}
+.entry-act.danger:hover{color:var(--danger)}
+     
 .entry-ctx{font-family:var(--mono);font-size:13px;color:var(--ink-dim);margin-top:6px}
 .entry-t{font-size:14px;margin-top:5px;padding-left:12px;line-height:1.5}
 
@@ -214,7 +248,7 @@ input::placeholder{color:var(--ink-dim);opacity:.6}
     <div class="row">
       <span class="row-label active">-</span>
       <!-- onkeydown: when you press Enter, it calls addThought() -->
-      <input id="thought-input" placeholder="your thought..." onkeydown="if(event.key==='Enter')addThought()">
+      <textarea id="thought-input" rows="1" placeholder="your thought..." onkeydown="handleThoughtKey(event)" oninput="autoGrow(this)"></textarea>
       <!-- Mic button for thoughts -->
       <button class="mic" id="mic-thought" onclick="toggleMic('thought')">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1a1a17" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>
@@ -288,6 +322,8 @@ let thoughts = [];
 let listening = false;      // true when the mic is active
 let listenTarget = null;    // which field is being dictated to: 'context' or 'thought'
 let recognition = null;     // the speech recognition object (created when you tap the mic)
+let editingId = null;       // which entry is in edit mode (null = none)
+let interimLen = 0;         // tracks interim transcript length for voice input
 
 // Voice language: defaults to English, tap the "EN/IT" button to switch
 let micLang = localStorage.getItem('thought-log-lang') || 'en-US';
@@ -420,6 +456,30 @@ function extractTags() {
     .map(([t]) => t);               // keep only the tag name, drop the count
 }
 
+function handleThoughtKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    addThought();
+  }
+}
+
+function autoGrow(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+}
+
+function cleanTranscript(text) {
+  let s = text.trim();
+  if (!s) return s;
+  // Capitalize first letter
+  s = s.charAt(0).toUpperCase() + s.slice(1);
+  // Capitalize after sentence-ending punctuation
+  s = s.replace(/([.!?]\s+)(\w)/g, (_, p, c) => p + c.toUpperCase());
+  // Add period if sentence doesn't end with punctuation
+  if (!/[.!?]$/.test(s)) s += '.';
+  return s;
+}
+
 
 // ===================================================================
 // 3. DATE/TIME STAMP (auto-updates every 30 seconds)
@@ -514,6 +574,7 @@ function addThought() {
   if (!t) return;                 // do nothing if the input is empty
   thoughts.push(t);              // add to the array (like append in Python)
   inp.value = '';                // clear the input field
+     autoGrow(inp);
   inp.focus();                   // put the cursor back in the input
   renderThoughts();              // redraw the list
 }
@@ -586,31 +647,126 @@ function updateLogCount() {
 function renderLog() {
   const container = document.getElementById('entries-container');
   const toolbar = document.getElementById('toolbar');
-  // Show toolbar only if there are entries
   toolbar.classList.toggle('hidden', entries.length === 0);
 
   if (entries.length === 0) {
     container.innerHTML = '<p class="empty">nothing here yet. go capture something.</p>';
     return;
   }
-  // Build the HTML for each entry
-  container.innerHTML = entries.map(e => `
+
+  container.innerHTML = entries.map(e => {
+    if (editingId === e.id) return renderEditForm(e);
+
+    return `
     <div class="entry">
       <div class="entry-head">
         <span class="entry-date">[${e.date} ${e.time}]</span>
-        <button class="entry-del" onclick="deleteEntry(${e.id})">del</button>
+        <div class="entry-actions">
+          <button class="entry-act" onclick="editEntry(${e.id})">edit</button>
+          <button class="entry-act danger" onclick="deleteEntry(${e.id})">del</button>
+        </div>
       </div>
       ${e.context ? `<div class="entry-ctx">@ ${escHtml(e.context)}</div>` : ''}
-      ${e.thoughts.map(t => `<div class="entry-t"><span style="color:var(--ink-dim);font-family:var(--mono)">- </span>${highlightTags(t)}</div>`).join('')}
-    </div>
-  `).join('');
+     ${e.thoughts.map(t => `<div class="entry-t"><span style="color:var(--ink-dim);font-family:var(--mono)">- </span>${highlightTags(t)}</div>`).join('')}
+    </div>`;
+  }).join('');
 }
 
+function renderEditForm(e) {
+  return `
+  <div class="entry" style="border-color:var(--accent)">
+    <div class="entry-head">
+      <span class="entry-date">[${e.date} ${e.time}]</span>
+      <span style="font-family:var(--mono);font-size:12px;color:var(--accent)">editing</span>
+    </div>
+    <div class="edit-form">
+      <div class="edit-row">
+        <span class="row-label">@</span>
+        <input class="edit-input" id="edit-ctx" value="${escHtml(e.context || '')}"
+          placeholder="where, when, why...">
+      </div>
+      ${e.thoughts.map((t, i) => `
+        <div class="edit-row">
+          <span class="row-label">-</span>
+          <input class="edit-input edit-thought" value="${escHtml(t)}"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();addEditThought();}">
+          <button class="edit-del" onclick="removeEditThought(${i})">×</button>
+        </div>
+      `).join('')}
+      <button class="edit-add" onclick="addEditThought()">+ add thought</button>
+      <div class="edit-actions">
+        <button class="edit-save" onclick="saveEdit(${e.id})">Save</button>
+        <button class="edit-cancel" onclick="cancelEdit()">cancel</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function editEntry(id) {
+  editingId = id;
+  renderLog();
+  const ctxInput = document.getElementById('edit-ctx');
+  if (ctxInput) ctxInput.focus();
+}
+
+function cancelEdit() {
+  editingId = null;
+  renderLog();
+}
+
+function saveEdit(id) {
+  const entry = entries.find(e => e.id === id);
+  if (!entry) return;
+  const ctxInput = document.getElementById('edit-ctx');
+  entry.context = ctxInput ? ctxInput.value.trim() : '';
+  const thoughtInputs = document.querySelectorAll('.edit-thought');
+  const newThoughts = [];
+  thoughtInputs.forEach(inp => {
+    const v = inp.value.trim();
+    if (v) newThoughts.push(v);
+  });
+  if (newThoughts.length === 0) { flash('Keep at least one thought'); return; }
+  entry.thoughts = newThoughts;
+  persist();
+  editingId = null;
+  renderLog();
+  flash('Updated');
+}
+
+function addEditThought() {
+  const entry = entries.find(e => e.id === editingId);
+  if (!entry) return;
+  syncEditFields(entry);
+  entry.thoughts.push('');
+  renderLog();
+  const inputs = document.querySelectorAll('.edit-thought');
+  if (inputs.length > 0) inputs[inputs.length - 1].focus();
+}
+
+function removeEditThought(i) {
+  const entry = entries.find(e => e.id === editingId);
+  if (!entry) return;
+  syncEditFields(entry);
+  if (entry.thoughts.length <= 1) { flash('Keep at least one thought'); return; }
+  entry.thoughts.splice(i, 1);
+  renderLog();
+}
+
+function syncEditFields(entry) {
+  const ctxInput = document.getElementById('edit-ctx');
+  if (ctxInput) entry.context = ctxInput.value;
+  const thoughtInputs = document.querySelectorAll('.edit-thought');
+  const synced = [];
+  thoughtInputs.forEach(inp => synced.push(inp.value));
+  if (synced.length > 0) entry.thoughts = synced;
+}
+     
 /**
  * deleteEntry(id) — Removes a single entry by its unique ID.
  * .filter() keeps only the entries whose ID does NOT match.
  */
 function deleteEntry(id) {
+     if (editingId === id) editingId = null;
   entries = entries.filter(e => e.id !== id);
   persist();
   updateLogCount();
@@ -649,7 +805,8 @@ function copyAll() {
  */
 function clearAll() {
   if (!confirm('Clear all entries?')) return;  // user clicked Cancel
-  entries = [];
+  entries = []; 
+  editingId = null;
   persist();
   updateLogCount();
   document.getElementById('export-area').classList.add('hidden');
@@ -674,46 +831,53 @@ function clearAll() {
  * r.onresult fires when speech is recognized and gives us the text.
  */
 function toggleMic(target) {
-  // If already listening to this target, stop
   if (listening && listenTarget === target) { stopMic(); return; }
-  // If browser doesn't support speech recognition
   if (!SpeechRecognition) { flash('Use your keyboard mic button'); return; }
-  // If already listening to something else, stop that first
   if (recognition) recognition.abort();
 
-  // Create a new speech recognition session
   const r = new SpeechRecognition();
-  r.lang = micLang;           // recognize the selected language (EN or IT)
-  r.interimResults = false;    // only give us the final result, not partial guesses
-  r.continuous = false;        // stop after one sentence (tap again for more)
+  r.lang = micLang;
+  r.interimResults = true;     // ← CHANGED from false
+  r.continuous = true;         // ← CHANGED from false
 
-  // When speech is successfully recognized:
+  const inp = target === 'context'
+    ? document.getElementById('ctx-input')
+    : document.getElementById('thought-input');
+
+  // Snapshot the existing text so we append after it
+  const baseText = inp.value;
+  interimLen = 0;
+
   r.onresult = (ev) => {
-    const text = ev.results[0][0].transcript;  // the recognized text
-    // Put the text into the appropriate input field
-    const inp = target === 'context'
-      ? document.getElementById('ctx-input')
-      : document.getElementById('thought-input');
-    // Append to existing text (if any), separated by a space
-    inp.value = (inp.value ? inp.value + ' ' : '') + text;
-    stopMic();
+    let final = '';
+    let interim = '';
+    for (let i = 0; i < ev.results.length; i++) {
+      const t = ev.results[i][0].transcript;
+      if (ev.results[i].isFinal) {
+        final += cleanTranscript(t) + ' ';
+      } else {
+        interim += t;
+      }
+    }
+    // Build the full field value: original text + finalized chunks + interim preview
+    inp.value = baseText + (baseText && final ? ' ' : '') + final + interim;
+    if (target === 'thought') autoGrow(inp);
   };
 
-  // If something goes wrong (permission denied, no speech detected, etc.)
   r.onerror = () => stopMic();
-  // When recognition ends naturally (after one sentence)
   r.onend = () => stopMic();
 
   recognition = r;
   try {
-    r.start();                 // actually start listening
+    r.start();
     listening = true;
     listenTarget = target;
-    updateMicUI();             // turn the mic button red
+    updateMicUI();
   } catch {
     flash('Mic not available');
   }
 }
+
 
 /**
  * stopMic() — Stops the current speech recognition session
