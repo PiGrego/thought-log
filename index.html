@@ -819,39 +819,34 @@ function clearAll() {
 // 7. VOICE INPUT (speech-to-text via the browser's built-in API)
 // ===================================================================
 
-/**
- * toggleMic(target) — Starts or stops voice recognition.
- * target is either 'context' (the @ field) or 'thought' (the - field).
- *
- * The Web Speech API is built into Chrome/Edge. It sends your audio
- * to Google's servers for transcription (needs internet), unless you
- * have offline language packs installed.
- *
- * r.lang = 'it-IT' tells it to expect Italian.
- * r.onresult fires when speech is recognized and gives us the text.
- */
 function toggleMic(target) {
-  if (listening && listenTarget === target) { stopMic(); return; }
+  // 1. Handle manual stop override
+  if (listening && listenTarget === target) {
+    listening = false; // Flag that user intentionally stopped
+    if (recognition) recognition.stop();
+    return;
+  }
+  
   if (!SpeechRecognition) { flash('Use your keyboard mic button'); return; }
-  if (recognition) recognition.abort();
+  if (recognition) { listening = false; recognition.abort(); }
 
   const r = new SpeechRecognition();
   r.lang = micLang;
-  r.interimResults = true;     // ← CHANGED from false
-  r.continuous = true;         // ← CHANGED from false
+  r.interimResults = true;
+  r.continuous = true; 
 
-  const inp = target === 'context'
-    ? document.getElementById('ctx-input')
+  const inp = target === 'context' 
+    ? document.getElementById('ctx-input') 
     : document.getElementById('thought-input');
 
-  // Snapshot the existing text so we append after it
-  const baseText = inp.value;
-  interimLen = 0;
+  let baseText = inp.value.trim();
 
   r.onresult = (ev) => {
     let final = '';
     let interim = '';
-    for (let i = 0; i < ev.results.length; i++) {
+
+    // FIX 1: Iterate only from resultIndex to prevent Android repetition
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
       const t = ev.results[i][0].transcript;
       if (ev.results[i].isFinal) {
         final += cleanTranscript(t) + ' ';
@@ -859,13 +854,36 @@ function toggleMic(target) {
         interim += t;
       }
     }
-    // Build the full field value: original text + finalized chunks + interim preview
-    inp.value = baseText + (baseText && final ? ' ' : '') + final + interim;
+
+    const space = baseText ? ' ' : '';
+    inp.value = baseText + space + final + interim;
+
+    // Commit final text immediately to survive the auto-restart loop
+    if (final) {
+      baseText = baseText + space + final.trim();
+    }
+
     if (target === 'thought') autoGrow(inp);
   };
 
-  r.onerror = () => stopMic();
-  r.onend = () => stopMic();
+  r.onerror = (e) => {
+    // Ignore native silence errors so control passes cleanly to onend
+    if (e.error === 'no-speech') return; 
+    stopMic();
+  };
+
+  r.onend = () => {
+    // FIX 2: Watchdog restart. If listening is still true, OS killed it. Restart instantly.
+    if (listening) {
+      try { 
+        r.start(); 
+      } catch { 
+        stopMic(); 
+      }
+    } else {
+      stopMic();
+    }
+  };
 
   recognition = r;
   try {
@@ -878,15 +896,15 @@ function toggleMic(target) {
   }
 }
 
-
-/**
- * stopMic() — Stops the current speech recognition session
- * and resets the mic button to its normal state.
- */
 function stopMic() {
-  if (recognition) recognition.stop();
   listening = false;
   listenTarget = null;
+  if (recognition) {
+    // Strip callbacks to prevent ghost restarts during manual abort
+    recognition.onend = null; 
+    recognition.onerror = null;
+    recognition.stop();
+  }
   recognition = null;
   updateMicUI();
 }
