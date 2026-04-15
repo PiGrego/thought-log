@@ -479,7 +479,7 @@ function handleThoughtKey(e) {
 function autoGrow(el) {
   el.style.height = 'auto';
   // [v2] min 24px so it doesn't collapse below one line
-  el.style.height = (el.scrollHeight > 24 ? : 24) + 'px';
+  el.style.height = Math.max(el.scrollHeight, 24) + 'px';
 }
 
 function cleanTranscript(text) {
