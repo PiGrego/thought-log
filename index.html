@@ -6,7 +6,7 @@
 <meta charset="UTF-8">
 <!-- This makes the page fit the phone screen properly and prevents
      the annoying zoom-in when you tap an input field -->
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <title>thought.log</title>
 
@@ -116,7 +116,6 @@ input::placeholder{color:var(--ink-dim);opacity:.6}
   resize:none;overflow:hidden;
   line-height:1.5;
   min-height:24px;max-height:160px;
-  field-sizing:content;
 }
 
 /* Microphone button: round, gold, turns red when recording */
@@ -215,7 +214,7 @@ input::placeholder{color:var(--ink-dim);opacity:.6}
 
   <!-- HEADER: logo + tab buttons -->
   <div class="header">
-<div class="logo">thought.log<span class="version">v1.2</span></div>
+<div class="logo">thought.log<span class="version">v1.3</span></div>
     <div class="tabs">
       <!-- Language toggle for voice input: tap to switch between EN and IT -->
       <button class="tab" id="lang-btn" onclick="toggleLang()" title="Voice language">EN</button>
