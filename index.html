@@ -65,7 +65,7 @@ html,body{
 /* Make inputs and buttons inherit the page font instead of using ugly defaults */
 input,textarea,button{font-family:inherit}
 /* Style the placeholder text in inputs */
-input::placeholder{color:var(--ink-dim);opacity:.6}
+input::placeholder,textarea::placeholder{color:var(--ink-dim);opacity:.6}
 
 /* === ANIMATIONS ===
    @keyframes defines an animation you can reuse.
@@ -213,7 +213,7 @@ input::placeholder{color:var(--ink-dim);opacity:.6}
 
   <!-- HEADER: logo + tab buttons -->
   <div class="header">
-<div class="logo">thought.log<span class="version">v1.4</span></div>
+<div class="logo">thought.log<span class="version">v2.0</span></div>
     <div class="tabs">
       <!-- Language toggle for voice input: tap to switch between EN and IT -->
       <button class="tab" id="lang-btn" onclick="toggleLang()" title="Voice language">EN</button>
@@ -311,7 +311,11 @@ input::placeholder{color:var(--ink-dim);opacity:.6}
 // localStorage stores data as text, so we use JSON.parse to convert
 // the text back into a JavaScript array of objects.
 // The '[]' is the default: an empty array if nothing was saved yet.
-let entries = JSON.parse(localStorage.getItem('thought-log') || '[]');
+let entries;
+try { entries = JSON.parse(localStorage.getItem('thought-log') || '[]'); }
+catch { entries = []; }
+// Sanitize: drop any entries missing required fields
+entries = entries.filter(e => e && e.id && e.date && e.time && Array.isArray(e.thoughts));
 
 // The thoughts being composed for the CURRENT entry (not yet saved).
 // This resets every time you hit "Save entry".
@@ -324,7 +328,7 @@ let recognition = null;     // the speech recognition object (created when you t
 let editingId = null;       // which entry is in edit mode (null = none)
 let lastProcessedPhrase = ''; // deduplication for Android ghost buffer
 let lastSpeechTime = 0;       // tracks when speech was last detected
-     
+
 // Voice language: defaults to English, tap the "EN/IT" button to switch
 let micLang = localStorage.getItem('thought-log-lang') || 'en-US';
 
@@ -364,11 +368,13 @@ function now() {
  * It appears, then disappears after 2 seconds.
  * Used for "Saved", "Copied to clipboard", etc.
  */
+let _flashTimer = 0;
 function flash(msg) {
   const t = document.getElementById('toast');
-  t.textContent = msg;           // set the message text
-  t.classList.remove('hidden');  // show it
-  setTimeout(() => t.classList.add('hidden'), 2000);  // hide after 2 seconds
+  t.textContent = msg;
+  t.classList.remove('hidden');
+  clearTimeout(_flashTimer);
+  _flashTimer = setTimeout(() => t.classList.add('hidden'), 2000);
 }
 
 /**
@@ -378,7 +384,7 @@ function flash(msg) {
  * Without this, the browser would try to run the code.
  */
 function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 /**
@@ -394,7 +400,7 @@ function escHtml(s) {
  * "try this <span class="ht">#idea</span> for <span class="ht">#removable</span>"
  */
 function highlightTags(text) {
-  return escHtml(text).replace(/(#\w+)/g, '<span class="ht">$1</span>');
+  return escHtml(text).replace(/(#[\w\u00C0-\u024F]+)/g, '<span class="ht">$1</span>');
 }
 
 /**
@@ -448,7 +454,7 @@ function persist() {
 function extractTags() {
   const c = {};  // counts object, like a Python dictionary: { '#removable': 5, '#idea': 2 }
   entries.forEach(e => e.thoughts.forEach(t => {
-    const m = t.match(/#\w+/g);                    // find all #tags in this thought
+    const m = t.match(/#[\w\u00C0-\u024F]+/g);  // find all #tags (supports accented chars)
     if (m) m.forEach(tag => c[tag] = (c[tag]||0) + 1);  // increment count (or start at 1)
   }));
   return Object.entries(c)          // convert { '#removable': 5 } to [['#removable', 5]]
@@ -508,8 +514,7 @@ setInterval(updateStamp, 30000);        // then every 30 seconds (30000 millisec
  * - If switching to log, re-renders the entries
  */
 function switchView(v) {
-  // Update tab styling: make the clicked tab "active", deactivate the other
-  document.querySelectorAll('.tab').forEach(t =>
+  document.querySelectorAll('.tab[data-view]').forEach(t =>
     t.classList.toggle('active', t.dataset.view === v)
   );
   // Show/hide views: classList.toggle('hidden', condition)
@@ -569,14 +574,15 @@ function renderTagsBar() {
  * thoughts array, clears the input, and re-renders the list.
  */
 function addThought() {
+  if (listening && listenTarget === 'thought') stopMic();
   const inp = document.getElementById('thought-input');
-  const t = inp.value.trim();     // .trim() removes leading/trailing spaces
-  if (!t) return;                 // do nothing if the input is empty
-  thoughts.push(t);              // add to the array (like append in Python)
-  inp.value = '';                // clear the input field
-     autoGrow(inp);
-  inp.focus();                   // put the cursor back in the input
-  renderThoughts();              // redraw the list
+  const t = inp.value.trim();
+  if (!t) return;
+  thoughts.push(t);
+  inp.value = '';
+  autoGrow(inp);
+  inp.focus();
+  renderThoughts();
 }
 
 /**
@@ -606,6 +612,7 @@ function insertTag(tag) {
  * After saving, it clears the current composition and refreshes the UI.
  */
 function saveEntry() {
+  if (listening) stopMic();  // commit voice text and stop before saving
   if (thoughts.length === 0) { flash('Add at least one thought'); return; }
   const {date, time} = now();
   const ctx = document.getElementById('ctx-input').value.trim();
@@ -823,18 +830,20 @@ function clearAll() {
 // 7. VOICE INPUT (speech-to-text via the browser's built-in API)
 // ===================================================================
 
-// --- Voice accumulator (fixes the Android interim-text contamination bug) ---
-// Instead of reading back inp.value each loop (which contains leftover interim
-// text), we track finalized speech in a dedicated variable and only write to
-// the input field as a pure render step.
-let voiceBaseText = '';      // text that existed BEFORE mic was turned on
-let voiceFinalizedText = ''; // all finalized speech accumulated across loops
+// --- Voice accumulator ---
+// We track finalized speech in a dedicated variable and treat the input
+// field as a pure render target (never read back from it).
+let voiceBaseText = '';       // text that existed BEFORE mic was turned on
+let voiceFinalizedText = '';  // all finalized speech accumulated in this session
 
 function toggleMic(target) {
+  // Same target → toggle off
   if (listening && listenTarget === target) { stopMic(); return; }
+  // Different target → stop previous, then start new
+  if (listening) stopMic();
   if (!SpeechRecognition) { flash('Not supported — use keyboard mic'); return; }
 
-  // Capture the pre-existing input value ONCE, before any loop starts
+  // Capture the pre-existing input value ONCE
   const inp = target === 'context'
     ? document.getElementById('ctx-input')
     : document.getElementById('thought-input');
@@ -847,68 +856,78 @@ function toggleMic(target) {
   lastSpeechTime = Date.now();
   updateMicUI();
 
-  runDictationLoop(target);
+  startRecognition(target);
 }
 
-function runDictationLoop(target) {
+function startRecognition(target) {
   if (!listening || listenTarget !== target) return;
 
   const r = new SpeechRecognition();
   r.lang = micLang;
   r.interimResults = true;
-  r.continuous = false; // manual restart loop — most reliable on Android
+  // KEY: continuous=true keeps ONE session open — no repeated start/stop
+  // sounds on Android. The mic stays live between pauses.
+  r.continuous = true;
 
   const inp = target === 'context'
     ? document.getElementById('ctx-input')
     : document.getElementById('thought-input');
 
+  // With continuous=true, ev.results accumulates ALL results from the
+  // session. processedUpTo tracks which ones we've already handled.
+  let processedUpTo = 0;
+
   r.onresult = (ev) => {
     let newFinal = '';
     let interim = '';
 
-    for (let i = 0; i < ev.results.length; i++) {
+    // Only process new results (skip already-processed ones)
+    for (let i = processedUpTo; i < ev.results.length; i++) {
       const t = ev.results[i][0].transcript;
       if (ev.results[i].isFinal) {
         const cleaned = cleanTranscript(t);
-        // Deduplicate Android ghost buffer: compare normalized lowercase
+        // Deduplicate Android ghost buffer (case-insensitive)
         if (cleaned && cleaned.toLowerCase() !== lastProcessedPhrase.toLowerCase()) {
           newFinal += cleaned + ' ';
           lastProcessedPhrase = cleaned;
         }
+        processedUpTo = i + 1;
       } else {
         interim += t;
       }
     }
 
-    // Accumulate finalized text (never lost between loops)
+    // Accumulate finalized text
     if (newFinal) {
       voiceFinalizedText += (voiceFinalizedText ? ' ' : '') + newFinal.trim();
       lastSpeechTime = Date.now();
     }
 
-    // Render: base + finalized + interim preview
-    const parts = [voiceBaseText, voiceFinalizedText].filter(Boolean).join(' ');
+    // Render: base + finalized + interim preview (normalize spaces)
+    const parts = [voiceBaseText, voiceFinalizedText].filter(Boolean).join(' ').replace(/  +/g, ' ');
     inp.value = parts + (interim ? (parts ? ' ' : '') + interim : '');
     autoGrow(inp);
   };
 
   r.onerror = (e) => {
-    // 'no-speech' and 'network' are transient — let the loop restart
-    if (e.error !== 'no-speech' && e.error !== 'network' && e.error !== 'aborted') {
-      stopMic();
-    }
+    // These are transient on Android — let onend handle restart
+    if (e.error === 'no-speech' || e.error === 'network' || e.error === 'aborted') return;
+    stopMic();
   };
 
   r.onend = () => {
+    // continuous=true sessions CAN end on their own (Android resource
+    // management, long silence, OS reclaims mic). If we're still
+    // "listening", silently restart — but this should be rare, not
+    // every few seconds like the old loop.
     if (!listening || listenTarget !== target) return;
-    // Auto-stop after 30s of silence
     if (Date.now() - lastSpeechTime > 30000) {
       stopMic();
       flash('Mic stopped (silence)');
       return;
     }
-    // Restart loop with slight delay (Android needs ~100ms to release audio)
-    setTimeout(() => runDictationLoop(target), 120);
+    // Restart after unexpected end (longer delay = less audible)
+    setTimeout(() => startRecognition(target), 300);
   };
 
   recognition = r;
@@ -921,7 +940,7 @@ function stopMic() {
     const inp = listenTarget === 'context'
       ? document.getElementById('ctx-input')
       : document.getElementById('thought-input');
-    const parts = [voiceBaseText, voiceFinalizedText].filter(Boolean).join(' ');
+    const parts = [voiceBaseText, voiceFinalizedText].filter(Boolean).join(' ').replace(/  +/g, ' ');
     inp.value = parts;
     autoGrow(inp);
   }
@@ -965,6 +984,7 @@ function updateMicUI() {
  * Saves the preference to localStorage so it persists across sessions.
  */
 function toggleLang() {
+  if (listening) stopMic();  // language change mid-dictation = garbage
   micLang = (micLang === 'en-US') ? 'it-IT' : 'en-US';
   localStorage.setItem('thought-log-lang', micLang);
   updateLangUI();
@@ -993,7 +1013,7 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
-     // Kill microphone loop if user locks phone or switches apps
+// Kill microphone if user locks phone or switches apps
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden' && listening) {
     stopMic();  // stopMic now commits finalized text before stopping
