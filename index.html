@@ -379,7 +379,7 @@ function flash(msg) {
  * Without this, the browser would try to run the code.
  */
 function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 /**
@@ -957,6 +957,14 @@ updateLangUI();
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
+
+     // Kill microphone loop if user locks phone or switches apps
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && listening) {
+    stopMic();
+    flash('Mic paused (backgrounded)');
+  }
+});
 
 </script>
 </body>
