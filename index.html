@@ -109,13 +109,12 @@ input::placeholder{color:var(--ink-dim);opacity:.6}
 .row{display:flex;align-items:center;gap:8px;padding:10px 16px;background:var(--surface);border-left:1px solid var(--border);border-right:1px solid var(--border)}
 .row-label{font-family:var(--mono);color:var(--ink-dim);font-size:15px;flex-shrink:0}
 .row-label.active{color:var(--accent)}
-.row input{flex:1;background:transparent;border:none;outline:none;color:var(--ink);font-size:15px}
 .row textarea{
   flex:1;background:transparent;border:none;outline:none;
   color:var(--ink);font-size:15px;font-family:inherit;
   resize:none;overflow:hidden;
   line-height:1.5;
-  min-height:24px;max-height:160px;
+  min-height:24px;
 }
 
 /* Microphone button: round, gold, turns red when recording */
@@ -234,7 +233,7 @@ input::placeholder{color:var(--ink-dim);opacity:.6}
     <!-- Context row: the @ line (where/when/why) -->
     <div class="row">
       <span class="row-label">@</span>
-      <input id="ctx-input" placeholder="where, when, why...">
+         <textarea id="ctx-input" rows="1" placeholder="where, when, why..." oninput="autoGrow(this)"></textarea>
       <!-- Mic button for context — the SVG inside is just a microphone icon drawing -->
       <button class="mic" id="mic-ctx" onclick="toggleMic('context')">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1a1a17" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>
@@ -324,6 +323,7 @@ let listenTarget = null;    // which field is being dictated to: 'context' or 't
 let recognition = null;     // the speech recognition object (created when you tap the mic)
 let editingId = null;       // which entry is in edit mode (null = none)
 let lastProcessedPhrase = ''; // v1.3
+let lastSpeechTime = 0;       // tracks when speech was last detected
      
 // Voice language: defaults to English, tap the "EN/IT" button to switch
 let micLang = localStorage.getItem('thought-log-lang') || 'en-US';
@@ -827,6 +827,7 @@ function toggleMic(target) {
   
   listening = true;
   listenTarget = target;
+lastSpeechTime = Date.now();
   updateMicUI();
   
   runDictationLoop(target);
@@ -869,6 +870,7 @@ function runDictationLoop(target) {
     }
     
     isFirstResult = false; 
+     lastSpeechTime = Date.now();
 
     const cleanFinal = final.trim();
     const space = baseText && (cleanFinal || interim) ? ' ' : '';
@@ -881,11 +883,16 @@ function runDictationLoop(target) {
     if (e.error !== 'no-speech' && e.error !== 'network') stopMic();
   };
 
-  r.onend = () => {
-    if (listening && listenTarget === target) {
-      setTimeout(() => runDictationLoop(target), 50);
+r.onend = () => {
+  if (listening && listenTarget === target) {
+    if (Date.now() - lastSpeechTime > 30000) {
+      stopMic();
+      flash('Mic stopped (silence)');
+      return;
     }
-  };
+    setTimeout(() => runDictationLoop(target), 50);
+  }
+};
 
   recognition = r;
   try { r.start(); } catch { stopMic(); }
