@@ -6,7 +6,7 @@
 <meta charset="UTF-8">
 <!-- This makes the page fit the phone screen properly and prevents
      the annoying zoom-in when you tap an input field -->
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 
 <title>thought.log</title>
 
@@ -34,7 +34,7 @@
      Think of HTML as the skeleton and CSS as the skin/clothes. -->
 <style>
 /* Reset: remove default browser spacing so everything starts from zero */
-*{box-sizing:border-box;margin:0;padding:0}
+*{box-sizing:border-box;margin:0;padding:0;touch-action:manipulation}
 
 /* :root defines "variables" — like constants in MATLAB.
    Instead of writing #1a1a17 everywhere, we write var(--bg).
@@ -213,7 +213,7 @@ input::placeholder{color:var(--ink-dim);opacity:.6}
 
   <!-- HEADER: logo + tab buttons -->
   <div class="header">
-<div class="logo">thought.log<span class="version">v1.3</span></div>
+<div class="logo">thought.log<span class="version">v1.4</span></div>
     <div class="tabs">
       <!-- Language toggle for voice input: tap to switch between EN and IT -->
       <button class="tab" id="lang-btn" onclick="toggleLang()" title="Voice language">EN</button>
@@ -322,7 +322,7 @@ let listening = false;      // true when the mic is active
 let listenTarget = null;    // which field is being dictated to: 'context' or 'thought'
 let recognition = null;     // the speech recognition object (created when you tap the mic)
 let editingId = null;       // which entry is in edit mode (null = none)
-let lastProcessedPhrase = ''; // v1.3
+let lastProcessedPhrase = ''; // deduplication for Android ghost buffer
 let lastSpeechTime = 0;       // tracks when speech was last detected
      
 // Voice language: defaults to English, tap the "EN/IT" button to switch
@@ -465,7 +465,7 @@ function handleThoughtKey(e) {
 
 function autoGrow(el) {
   el.style.height = 'auto';
-  el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+  el.style.height = (el.scrollHeight > 24 ? Math.min(el.scrollHeight, 160) : 24) + 'px';
 }
 
 function cleanTranscript(text) {
@@ -620,8 +620,12 @@ function saveEntry() {
   persist();                    // save to localStorage
   // Reset the capture form
   thoughts = [];
-  document.getElementById('ctx-input').value = '';
-  document.getElementById('thought-input').value = '';
+  const ctxInp = document.getElementById('ctx-input');
+  const thoughtInp = document.getElementById('thought-input');
+  ctxInp.value = '';
+  thoughtInp.value = '';
+  ctxInp.style.height = 'auto';
+  thoughtInp.style.height = 'auto';
   renderThoughts();
   renderTagsBar();              // update tag suggestions (new tags might have been added)
   updateLogCount();             // update "log (N)" in the tab
@@ -819,17 +823,30 @@ function clearAll() {
 // 7. VOICE INPUT (speech-to-text via the browser's built-in API)
 // ===================================================================
 
-// Android Buffer Cache for Deduplication
+// --- Voice accumulator (fixes the Android interim-text contamination bug) ---
+// Instead of reading back inp.value each loop (which contains leftover interim
+// text), we track finalized speech in a dedicated variable and only write to
+// the input field as a pure render step.
+let voiceBaseText = '';      // text that existed BEFORE mic was turned on
+let voiceFinalizedText = ''; // all finalized speech accumulated across loops
 
 function toggleMic(target) {
   if (listening && listenTarget === target) { stopMic(); return; }
-  if (!SpeechRecognition) { flash('Not supported'); return; }
-  
+  if (!SpeechRecognition) { flash('Not supported — use keyboard mic'); return; }
+
+  // Capture the pre-existing input value ONCE, before any loop starts
+  const inp = target === 'context'
+    ? document.getElementById('ctx-input')
+    : document.getElementById('thought-input');
+  voiceBaseText = inp.value.trimEnd();
+  voiceFinalizedText = '';
+  lastProcessedPhrase = '';
+
   listening = true;
   listenTarget = target;
-lastSpeechTime = Date.now();
+  lastSpeechTime = Date.now();
   updateMicUI();
-  
+
   runDictationLoop(target);
 }
 
@@ -839,71 +856,83 @@ function runDictationLoop(target) {
   const r = new SpeechRecognition();
   r.lang = micLang;
   r.interimResults = true;
-  r.continuous = false; // Forced false to manage the loop manually
+  r.continuous = false; // manual restart loop — most reliable on Android
 
-  const inp = target === 'context' 
-    ? document.getElementById('ctx-input') 
+  const inp = target === 'context'
+    ? document.getElementById('ctx-input')
     : document.getElementById('thought-input');
 
-  const baseText = inp.value.trim();
-  let isFirstResult = true; 
-
   r.onresult = (ev) => {
-    let final = '';
+    let newFinal = '';
     let interim = '';
-    
+
     for (let i = 0; i < ev.results.length; i++) {
       const t = ev.results[i][0].transcript;
-      
       if (ev.results[i].isFinal) {
         const cleaned = cleanTranscript(t);
-        
-        if (isFirstResult && cleaned === lastProcessedPhrase) {
-           // Block Android ghost buffer duplicate
-        } else {
-           final += cleaned + ' ';
-           lastProcessedPhrase = cleaned;
+        // Deduplicate Android ghost buffer: compare normalized lowercase
+        if (cleaned && cleaned.toLowerCase() !== lastProcessedPhrase.toLowerCase()) {
+          newFinal += cleaned + ' ';
+          lastProcessedPhrase = cleaned;
         }
       } else {
         interim += t;
       }
     }
-    
-    isFirstResult = false; 
-     lastSpeechTime = Date.now();
 
-    const cleanFinal = final.trim();
-    const space = baseText && (cleanFinal || interim) ? ' ' : '';
-    inp.value = baseText + space + cleanFinal + (interim ? ' ' + interim : '');
+    // Accumulate finalized text (never lost between loops)
+    if (newFinal) {
+      voiceFinalizedText += (voiceFinalizedText ? ' ' : '') + newFinal.trim();
+      lastSpeechTime = Date.now();
+    }
 
-    if (target === 'thought') autoGrow(inp);
+    // Render: base + finalized + interim preview
+    const parts = [voiceBaseText, voiceFinalizedText].filter(Boolean).join(' ');
+    inp.value = parts + (interim ? (parts ? ' ' : '') + interim : '');
+    autoGrow(inp);
   };
 
   r.onerror = (e) => {
-    if (e.error !== 'no-speech' && e.error !== 'network') stopMic();
+    // 'no-speech' and 'network' are transient — let the loop restart
+    if (e.error !== 'no-speech' && e.error !== 'network' && e.error !== 'aborted') {
+      stopMic();
+    }
   };
 
-r.onend = () => {
-  if (listening && listenTarget === target) {
+  r.onend = () => {
+    if (!listening || listenTarget !== target) return;
+    // Auto-stop after 30s of silence
     if (Date.now() - lastSpeechTime > 30000) {
       stopMic();
       flash('Mic stopped (silence)');
       return;
     }
-    setTimeout(() => runDictationLoop(target), 50);
-  }
-};
+    // Restart loop with slight delay (Android needs ~100ms to release audio)
+    setTimeout(() => runDictationLoop(target), 120);
+  };
 
   recognition = r;
   try { r.start(); } catch { stopMic(); }
 }
 
 function stopMic() {
+  // Commit finalized text to the input (strip any leftover interim)
+  if (listening && listenTarget) {
+    const inp = listenTarget === 'context'
+      ? document.getElementById('ctx-input')
+      : document.getElementById('thought-input');
+    const parts = [voiceBaseText, voiceFinalizedText].filter(Boolean).join(' ');
+    inp.value = parts;
+    autoGrow(inp);
+  }
+
   listening = false;
   listenTarget = null;
-  lastProcessedPhrase = ''; // Reset deduplication cache
+  voiceBaseText = '';
+  voiceFinalizedText = '';
+  lastProcessedPhrase = '';
   if (recognition) {
-    recognition.onend = null; 
+    recognition.onend = null;
     recognition.onerror = null;
     try { recognition.stop(); } catch(e){}
   }
@@ -967,8 +996,8 @@ if ('serviceWorker' in navigator) {
      // Kill microphone loop if user locks phone or switches apps
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden' && listening) {
-    stopMic();
-    flash('Mic paused (backgrounded)');
+    stopMic();  // stopMic now commits finalized text before stopping
+    flash('Mic paused');
   }
 });
 
