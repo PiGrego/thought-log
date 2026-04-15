@@ -324,8 +324,8 @@ let listening = false;      // true when the mic is active
 let listenTarget = null;    // which field is being dictated to: 'context' or 'thought'
 let recognition = null;     // the speech recognition object (created when you tap the mic)
 let editingId = null;       // which entry is in edit mode (null = none)
-let interimLen = 0;         // tracks interim transcript length for voice input
-
+let lastProcessedPhrase = ''; // v1.3
+     
 // Voice language: defaults to English, tap the "EN/IT" button to switch
 let micLang = localStorage.getItem('thought-log-lang') || 'en-US';
 
@@ -820,117 +820,107 @@ function clearAll() {
 // 7. VOICE INPUT (speech-to-text via the browser's built-in API)
 // ===================================================================
 
+// Android Buffer Cache for Deduplication
+let lastProcessedPhrase = '';
+
 function toggleMic(target) {
-  // 1. Handle manual stop override
-  if (listening && listenTarget === target) {
-    listening = false; // Flag that user intentionally stopped
-    if (recognition) recognition.stop();
-    return;
-  }
+  if (listening && listenTarget === target) { stopMic(); return; }
+  if (!SpeechRecognition) { flash('Not supported'); return; }
   
-  if (!SpeechRecognition) { flash('Use your keyboard mic button'); return; }
-  if (recognition) { listening = false; recognition.abort(); }
+  listening = true;
+  listenTarget = target;
+  updateMicUI();
+  
+  runDictationLoop(target);
+}
+
+function runDictationLoop(target) {
+  if (!listening || listenTarget !== target) return;
 
   const r = new SpeechRecognition();
   r.lang = micLang;
   r.interimResults = true;
-  r.continuous = true; 
+  r.continuous = false; // Forced false to manage the loop manually
 
   const inp = target === 'context' 
     ? document.getElementById('ctx-input') 
     : document.getElementById('thought-input');
 
-  let baseText = inp.value.trim();
+  const baseText = inp.value.trim();
+  let isFirstResult = true; 
 
   r.onresult = (ev) => {
     let final = '';
     let interim = '';
-
-    // FIX 1: Iterate only from resultIndex to prevent Android repetition
-    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+    
+    for (let i = 0; i < ev.results.length; i++) {
       const t = ev.results[i][0].transcript;
+      
       if (ev.results[i].isFinal) {
-        final += cleanTranscript(t) + ' ';
+        const cleaned = cleanTranscript(t);
+        
+        if (isFirstResult && cleaned === lastProcessedPhrase) {
+           // Block Android ghost buffer duplicate
+        } else {
+           final += cleaned + ' ';
+           lastProcessedPhrase = cleaned;
+        }
       } else {
         interim += t;
       }
     }
+    
+    isFirstResult = false; 
 
-    const space = baseText ? ' ' : '';
-    inp.value = baseText + space + final + interim;
-
-    // Commit final text immediately to survive the auto-restart loop
-    if (final) {
-      baseText = baseText + space + final.trim();
-    }
+    const cleanFinal = final.trim();
+    const space = baseText && (cleanFinal || interim) ? ' ' : '';
+    inp.value = baseText + space + cleanFinal + (interim ? ' ' + interim : '');
 
     if (target === 'thought') autoGrow(inp);
   };
 
   r.onerror = (e) => {
-    // Ignore native silence errors so control passes cleanly to onend
-    if (e.error === 'no-speech') return; 
-    stopMic();
+    if (e.error !== 'no-speech' && e.error !== 'network') stopMic();
   };
 
   r.onend = () => {
-    // FIX 2: Watchdog restart. If listening is still true, OS killed it. Restart instantly.
-    if (listening) {
-      try { 
-        r.start(); 
-      } catch { 
-        stopMic(); 
-      }
-    } else {
-      stopMic();
+    if (listening && listenTarget === target) {
+      setTimeout(() => runDictationLoop(target), 50);
     }
   };
 
   recognition = r;
-  try {
-    r.start();
-    listening = true;
-    listenTarget = target;
-    updateMicUI();
-  } catch {
-    flash('Mic not available');
-  }
+  try { r.start(); } catch { stopMic(); }
 }
 
 function stopMic() {
   listening = false;
   listenTarget = null;
+  lastProcessedPhrase = ''; // Reset deduplication cache
   if (recognition) {
-    // Strip callbacks to prevent ghost restarts during manual abort
     recognition.onend = null; 
     recognition.onerror = null;
-    recognition.stop();
+    try { recognition.stop(); } catch(e){}
   }
   recognition = null;
   updateMicUI();
 }
 
-/**
- * updateMicUI() — Swaps the mic icon between "microphone" and "stop square",
- * and toggles the red pulsing animation.
- *
- * The SVG strings are just icon drawings:
- * - micIcon: a microphone shape
- * - stopIcon: a square (universal "stop" symbol)
- */
 function updateMicUI() {
   const micCtx = document.getElementById('mic-ctx');
   const micThought = document.getElementById('mic-thought');
   const stopIcon = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1a1a17" stroke-width="2.5"><rect x="6" y="6" width="12" height="12" rx="2" fill="#1a1a17"/></svg>';
   const micIcon = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1a1a17" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>';
 
-  // Set the right icon and animation state for each mic button
-  micCtx.innerHTML = (listening && listenTarget === 'context') ? stopIcon : micIcon;
-  micCtx.classList.toggle('on', listening && listenTarget === 'context');
-  micThought.innerHTML = (listening && listenTarget === 'thought') ? stopIcon : micIcon;
-  micThought.classList.toggle('on', listening && listenTarget === 'thought');
+  if(micCtx) {
+    micCtx.innerHTML = (listening && listenTarget === 'context') ? stopIcon : micIcon;
+    micCtx.classList.toggle('on', listening && listenTarget === 'context');
+  }
+  if(micThought) {
+    micThought.innerHTML = (listening && listenTarget === 'thought') ? stopIcon : micIcon;
+    micThought.classList.toggle('on', listening && listenTarget === 'thought');
+  }
 }
-
 
 // ===================================================================
 // 8. INITIALIZATION (runs once when the page loads)
